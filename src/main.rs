@@ -6,8 +6,8 @@ mod db;
 
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::audio::AudioEngine;
-use crate::audio::equalizer::{BiquadFilter, BiquadType};
+use crate::audio::equalizer::BiquadType;
+use crate::audio::{AudioEngine, EqBand};
 use crate::downloader::DownloadQueue;
 use crate::db::Database;
 use std::path::PathBuf;
@@ -16,18 +16,14 @@ struct EqState {
     frequency: f32,
     q: f32,
     gain: f32,
-    filter: BiquadFilter,
 }
 
 impl EqState {
     fn new() -> Self {
-        let mut filter = BiquadFilter::new();
-        filter.set_params(BiquadType::Peaking, 44100.0, 1000.0, 1.0, 0.0);
         Self {
             frequency: 1000.0,
             q: 1.0,
             gain: 0.0,
-            filter,
         }
     }
 
@@ -35,7 +31,15 @@ impl EqState {
         self.frequency = frequency;
         self.q = q;
         self.gain = gain;
-        self.filter.set_params(BiquadType::Peaking, 44100.0, frequency, q, gain);
+    }
+
+    fn as_band(&self) -> EqBand {
+        EqBand {
+            filter_type: BiquadType::Peaking,
+            frequency: self.frequency,
+            q: self.q,
+            gain_db: self.gain,
+        }
     }
 }
 
@@ -52,8 +56,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let eq_play = Rc::clone(&eq_state);
     let play_path = Rc::clone(&last_downloaded_path);
     window.on_play_clicked(move || {
-        let _eq = eq_play.borrow();
-        let path_to_play = play_path.borrow().clone().unwrap_or_else(|| PathBuf::from("assets/example.mp3"));
+        let band = eq_play.borrow().as_band();
+        engine_play.borrow_mut().set_eq_band(band);
+
+        let path_to_play = play_path
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("assets/example.mp3"));
         if let Err(e) = engine_play.borrow_mut().play(&path_to_play) {
             eprintln!("error al reproducir {:?}: {}", path_to_play, e);
         }
@@ -79,8 +88,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Equalizer ---
     let eq_ui = Rc::clone(&eq_state);
+    let engine_eq = Rc::clone(&engine);
     window.on_eq_params_changed(move |frequency, q, gain| {
-        eq_ui.borrow_mut().update(frequency, q, gain);
+        let band = {
+            let mut state = eq_ui.borrow_mut();
+            state.update(frequency, q, gain);
+            state.as_band()
+        };
+        engine_eq.borrow_mut().set_eq_band(band);
     });
 
     // --- Downloader ---

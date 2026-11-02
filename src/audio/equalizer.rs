@@ -48,70 +48,68 @@ impl BiquadFilter {
     /// - `q`: factor Q (ancho de banda). Debe ser > 0.
     /// - `gain_db`: ganancia en dB (solo aplica a Peaking, LowShelf, HighShelf).
     pub fn set_params(&mut self, filter_type: BiquadType, sample_rate: f32, frequency: f32, q: f32, gain_db: f32) {
-        let a0 = 1.0;
         let w0 = 2.0 * PI * frequency / sample_rate;
-        let alpha = (w0 / 2.0) * (1.0 / q.max(0.001)).sin().min(1.0);
-        let a = 10.0f32.powf(gain_db / 40.0);
         let cos_w0 = w0.cos();
-        let _sin_w0 = w0.sin();
+        let alpha = w0.sin() / (2.0 * q.max(0.001));
+        let a = 10.0f32.powf(gain_db / 40.0);
 
-        let mut b0: f32;
-        let mut b1: f32;
-        let mut b2: f32;
-        let mut a1: f32;
-        let mut a2: f32;
-        match filter_type {
-            BiquadType::Lowpass => {
-                b0 = (1.0 - cos_w0) / 2.0;
-                b1 = 1.0 - cos_w0;
-                b2 = (1.0 - cos_w0) / 2.0;
-                a1 = -2.0 * cos_w0;
-                a2 = 1.0 - alpha;
-            }
-            BiquadType::Highpass => {
-                b0 = (1.0 + cos_w0) / 2.0;
-                b1 = -(1.0 + cos_w0);
-                b2 = (1.0 + cos_w0) / 2.0;
-                a1 = -2.0 * cos_w0;
-                a2 = 1.0 - alpha;
-            }
-            BiquadType::Peaking => {
-                b0 = 1.0 + alpha * a;
-                b1 = -2.0 * cos_w0;
-                b2 = 1.0 - alpha * a;
-                a1 = -2.0 * cos_w0;
-                a2 = 1.0 - alpha / a;
-            }
+        let (b0, b1, b2, a0, a1, a2) = match filter_type {
+            BiquadType::Lowpass => (
+                (1.0 - cos_w0) / 2.0,
+                1.0 - cos_w0,
+                (1.0 - cos_w0) / 2.0,
+                1.0 + alpha,
+                -2.0 * cos_w0,
+                1.0 - alpha,
+            ),
+            BiquadType::Highpass => (
+                (1.0 + cos_w0) / 2.0,
+                -(1.0 + cos_w0),
+                (1.0 + cos_w0) / 2.0,
+                1.0 + alpha,
+                -2.0 * cos_w0,
+                1.0 - alpha,
+            ),
+            BiquadType::Peaking => (
+                1.0 + alpha * a,
+                -2.0 * cos_w0,
+                1.0 - alpha * a,
+                1.0 + alpha / a,
+                -2.0 * cos_w0,
+                1.0 - alpha / a,
+            ),
             BiquadType::LowShelf => {
                 let term = 2.0 * a.sqrt() * alpha;
-                b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + term);
-                b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
-                b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - term);
-                a1 = -2.0 * cos_w0;
-                a2 = (a + 1.0) + (a - 1.0) * cos_w0 - term;
+                let cos_term = (a - 1.0) * cos_w0;
+                (
+                    a * ((a + 1.0) - cos_term + term),
+                    2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0),
+                    a * ((a + 1.0) - cos_term - term),
+                    (a + 1.0) + cos_term + term,
+                    -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0),
+                    (a + 1.0) + cos_term - term,
+                )
             }
             BiquadType::HighShelf => {
                 let term = 2.0 * a.sqrt() * alpha;
-                b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + term);
-                b1 = -2.0 * a * ((a + 1.0) + (a - 1.0) * cos_w0);
-                b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - term);
-                a1 = 2.0 * cos_w0;
-                a2 = (a + 1.0) + (a - 1.0) * cos_w0 + term;
+                let cos_term = (a - 1.0) * cos_w0;
+                (
+                    a * ((a + 1.0) + cos_term + term),
+                    -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0),
+                    a * ((a + 1.0) + cos_term - term),
+                    (a + 1.0) - cos_term + term,
+                    2.0 * ((a - 1.0) - (a + 1.0) * cos_w0),
+                    (a + 1.0) - cos_term - term,
+                )
             }
-        }
+        };
 
         // Normalizar por a0 para evitar dividir en cada muestra.
-        b0 /= a0;
-        b1 /= a0;
-        b2 /= a0;
-        a1 /= a0;
-        a2 /= a0;
-
-        self.b0 = b0;
-        self.b1 = b1;
-        self.b2 = b2;
-        self.a1 = a1;
-        self.a2 = a2;
+        self.b0 = b0 / a0;
+        self.b1 = b1 / a0;
+        self.b2 = b2 / a0;
+        self.a1 = a1 / a0;
+        self.a2 = a2 / a0;
     }
 
     /// Procesa una muestra de audio estéreo/mono (valor único).
@@ -176,6 +174,27 @@ mod tests {
         // El pico en la frecuencia central debería amplificar la señal.
         let out = f.process(0.1);
         assert!(out.is_finite());
+    }
+
+    #[test]
+    fn peaking_zero_gain_is_unity() {
+        let mut f = BiquadFilter::new();
+        f.set_params(BiquadType::Peaking, 44100.0, 1000.0, 1.0, 0.0);
+        // Con A = 1 el numerador y el denominador son idénticos.
+        assert!((f.b0 - 1.0).abs() < 1e-5, "b0 = {}", f.b0);
+        assert!((f.b1 - f.a1).abs() < 1e-5, "b1 = {}, a1 = {}", f.b1, f.a1);
+        assert!((f.b2 - f.a2).abs() < 1e-5, "b2 = {}, a2 = {}", f.b2, f.a2);
+    }
+
+    #[test]
+    fn lowpass_has_unit_dc_gain() {
+        let mut f = BiquadFilter::new();
+        f.set_params(BiquadType::Lowpass, 44100.0, 1000.0, 0.707, 0.0);
+        let mut out = 0.0;
+        for _ in 0..4096 {
+            out = f.process(1.0);
+        }
+        assert!((out - 1.0).abs() < 1e-3, "ganancia DC inesperada: {out}");
     }
 
     #[test]
