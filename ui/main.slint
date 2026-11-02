@@ -1,0 +1,129 @@
+import { VerticalBox, HorizontalBox, Button, Slider } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    width: 900px;
+    height: 600px;
+    background: #1e1e2e;
+
+    callback play_clicked;
+    callback pause_clicked;
+    callback stop_clicked;
+    callback eq_params_changed(float, float, float);
+    callback download_clicked(string);
+    callback refresh_playlists_clicked;
+
+    property <float> eq_frequency: 1000.0;
+    property <float> eq_q: 1.0;
+    property <float> eq_gain: 0.0;
+    property <string> download_url: "";
+
+    VerticalBox {
+        alignment: center;
+        spacing: 12px;
+
+        Text {
+            text: "Rad Music Player";
+            color: #cdd6f4;
+            font-size: 24px;
+            font-weight: FontWeight.bold;
+        }
+
+        Rectangle {
+            width: 600px;
+            height: 4px;
+            background: #fab387;
+        }
+
+        HorizontalBox {
+            alignment: center;
+            spacing: 12px;
+
+            Button {
+                text: "Play";
+                clicked => { play_clicked(); }
+            }
+
+            Button {
+                text: "Pause";
+                clicked => { pause_clicked(); }
+            }
+
+            Button {
+                text: "Stop";
+                clicked => { stop_clicked(); }
+            }
+        }
+
+        Text {
+            text: "Descargar desde URL";
+            color: #fab387;
+            font-size: 14px;
+            font-weight: FontWeight.bold;
+        }
+
+        HorizontalBox {
+            alignment: center;
+            spacing: 8px;
+
+            Text {
+                text: "URL: ";
+                color: #cdd6f4;
+            }
+
+            Text {
+                text: download_url;
+                color: #6c7086;
+                font-size: 12px;
+            }
+
+            Button {
+                text: "Descargar";
+                clicked => { download_clicked(download_url); }
+            }
+        }
+
+        Button {
+            text: "Refrescar Playlists";
+            clicked => { refresh_playlists_clicked(); }
+        }
+
+        Text {
+            text: "Ecualizador (biquad)";
+            color: #fab387;
+            font-size: 14px;
+            font-weight: FontWeight.bold;
+        }
+
+        HorizontalBox {
+            alignment: center;
+            spacing: 12px;
+
+            Slider {
+                value: eq_frequency;
+                width: 200px;
+                changed => { eq_params_changed(self.value, eq_q, eq_gain); }
+            }
+
+            Slider {
+                value: eq_q;
+                width: 120px;
+                changed => { eq_params_changed(eq_frequency, self.value, eq_gain); }
+            }
+
+            Slider {
+                value: eq_gain;
+                width: 120px;
+                changed => { eq_params_changed(eq_frequency, eq_q, self.value); }
+            }
+        }
+
+        Slider {
+            width: 400px;
+        }
+
+        Text {
+            text: "00:00 / 00:00";
+            color: #6c7086;
+        }
+    }
+}
