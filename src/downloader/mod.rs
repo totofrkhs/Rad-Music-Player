@@ -73,26 +73,44 @@ impl DownloadQueue {
 
 /// Ejecuta yt-dlp para un job y devuelve la ruta del archivo descargado y la carátula.
 async fn run_job(job: DownloadJob) -> Result<(PathBuf, Option<PathBuf>), String> {
-    let output = Command::new("yt-dlp")
-        .arg("--extract-audio")
-        .arg("--audio-format")
-        .arg("mp3")
-        .arg("--write-thumbnail")
-        .arg("-o")
-        .arg(job.output_dir.join("%(title)s.%(ext)s").to_str().unwrap())
-        .arg(&job.url)
+    let output = build_command(&job)
         .output()
         .await
         .map_err(|e| format!("no se pudo lanzar yt-dlp: {}", e))?;
 
+    interpret_output(&job, output)
+}
+
+/// Construye el comando de yt-dlp para un job.
+fn build_command(job: &DownloadJob) -> Command {
+    let mut cmd = Command::new("yt-dlp");
+    cmd.arg("--extract-audio")
+        .arg("--audio-format")
+        .arg("mp3")
+        .arg("--write-thumbnail")
+        .arg("-o")
+        .arg(job.output_dir.join("%(title)s.%(ext)s"))
+        .arg(&job.url);
+    cmd
+}
+
+/// Traduce la salida de yt-dlp al resultado del job.
+///
+/// Nota: yt-dlp nombra el archivo con %(title)s; aquí devolvemos el directorio como referencia.
+fn interpret_output(
+    job: &DownloadJob,
+    output: std::process::Output,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("yt-dlp falló (código {}): {}", output.status.code().unwrap_or(-1), stderr));
+        return Err(format!(
+            "yt-dlp falló (código {}): {}",
+            output.status.code().unwrap_or(-1),
+            stderr
+        ));
     }
 
-    // Buscar el archivo de audio y la carátula generados en el directorio de salida.
-    // Nota: yt-dlp nombra el archivo con %(title)s; aquí devolvemos el directorio como referencia.
-    Ok((job.output_dir, None))
+    Ok((job.output_dir.clone(), None))
 }
 
 /// Lee etiquetas ID3 de un archivo de audio.
@@ -109,10 +127,76 @@ pub fn write_tags(path: &std::path::Path, tag: Tag) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::ExitStatus;
+
+    #[cfg(windows)]
+    fn exit_status(code: i32) -> ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(code as u32)
+    }
+
+    #[cfg(unix)]
+    fn exit_status(code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code)
+    }
+
+    fn test_job() -> DownloadJob {
+        DownloadJob {
+            id: 7,
+            url: "https://example.com/watch?v=abc".to_string(),
+            output_dir: PathBuf::from("downloads"),
+            state: JobState::Pending,
+        }
+    }
+
+    fn output_with(status: ExitStatus, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status,
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
 
     #[test]
     fn job_state_debug_works() {
         let state = JobState::Failed { reason: "test".into() };
         assert!(format!("{:?}", state).contains("Failed"));
+    }
+
+    #[test]
+    fn build_command_uses_expected_ytdlp_flags() {
+        let job = test_job();
+        let cmd = build_command(&job);
+        let std_cmd = cmd.as_std();
+        let args: Vec<String> = std_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(std_cmd.get_program().to_string_lossy(), "yt-dlp");
+        assert!(args.contains(&"--extract-audio".to_string()));
+        assert!(args.contains(&"mp3".to_string()));
+        assert!(args.contains(&"--write-thumbnail".to_string()));
+        assert!(args.contains(&"--audio-format".to_string()));
+        assert!(args.iter().any(|a| a.contains("%(title)s.%(ext)s")));
+        assert_eq!(args.last().unwrap(), &job.url);
+    }
+
+    #[test]
+    fn interpret_output_maps_failure_to_error() {
+        let job = test_job();
+        let err = interpret_output(&job, output_with(exit_status(1), "boom")).unwrap_err();
+        assert!(err.contains("yt-dlp falló"), "mensaje inesperado: {err}");
+        assert!(err.contains("boom"), "mensaje inesperado: {err}");
+        assert!(err.contains("(código 1)"), "mensaje inesperado: {err}");
+    }
+
+    #[test]
+    fn interpret_output_maps_success_to_output_dir() {
+        let job = test_job();
+        let (path, cover) = interpret_output(&job, output_with(exit_status(0), "")).unwrap();
+        assert_eq!(path, job.output_dir);
+        assert_eq!(cover, None);
     }
 }
